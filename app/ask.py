@@ -21,28 +21,50 @@ from app.config import MODEL, api_error_message, get_api_key
 DEFAULT_QUESTION = "AIE2026の講座の宿題にある「3レベル」とは何ですか？"
 
 
-def ask(question: str) -> str:
-    client = genai.Client(api_key=get_api_key())
-    response = client.models.generate_content(model=MODEL, contents=question)
+def ask(question: str, chat) -> str:
+    response = chat.send_message(question)
 
-    # TODO(第1回 演習): response.usage_metadata から
-    #   入力トークン数と出力トークン数を表示してみよう（Copilotに頼んでよい）
+    usage = response.usage_metadata
+    if usage is not None:
+        input_tokens = usage.prompt_token_count
+        output_tokens = usage.candidates_token_count
+        print(f"[入力トークン数] {input_tokens if input_tokens is not None else '不明'}")
+        print(f"[出力トークン数] {output_tokens if output_tokens is not None else '不明'}")
+    else:
+        print("[トークン数] 使用量の情報を取得できませんでした")
 
     return response.text
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="素のLLMに質問する")
+    parser = argparse.ArgumentParser(description="履歴を保ってLLMと対話する")
     parser.add_argument("question", nargs="?", default=DEFAULT_QUESTION)
     args = parser.parse_args()
 
+    #チャットの作成をループ外で1回行う
+    client = genai.Client(api_key=get_api_key())
+    chat = client.chats.create(model=MODEL)
+
     print(f"[model] {MODEL}")
-    print(f"[質問] {args.question}\n")
+    print("終了するには /exit または /quit を入力してください。")
+    question = args.question.strip()
+
     try:
-        print(ask(args.question))
+        while True:
+            if question.lower() in {"/exit", "/quit"}:
+                break
+            if question:
+                print(f"\n[質問] {question}")
+                answer = ask(question, chat)
+                print(f"[回答] \n{answer}")
+            question = input("\n次の質問 > ").strip()
+    except (EOFError, KeyboardInterrupt):
+        print("\n対話を終了します。")
     except errors.APIError as e:
         print(api_error_message(e.code, e.message))
         raise SystemExit(1)
+    finally:
+        client.close()
 
 
 if __name__ == "__main__":

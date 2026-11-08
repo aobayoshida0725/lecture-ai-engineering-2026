@@ -5,10 +5,14 @@
 """
 
 import json
+import random
+from datetime import datetime
 from functools import cache
 from pathlib import Path
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+# 第3回 宿題（実装）: 学習記録の保存先（.gitignore 済み）。テストでは tmp_path に差し替える
+LOG_DIR = Path(__file__).resolve().parent.parent / "learning_log"
 MAX_RESULTS = 3
 
 
@@ -77,3 +81,69 @@ def get_lecture_summary(lecture: int) -> str:
         available = sorted(p.stem for p in (DATA_DIR / "lectures").glob("*.md"))
         return f"第{lecture}回の要点はまだありません。用意されている回: {', '.join(available)}"
     return path.read_text(encoding="utf-8")
+
+
+def make_quiz(lecture: int) -> str:
+    """指定した回の用語から復習クイズを1問作る。
+
+    ユーザーが「第N回のクイズを出して」など、復習用の問題を求めたときに呼ぶ。
+    用語集からその回の用語を1つランダムに選び、問題と答えを返す。
+
+    Args:
+        lecture: 講義の回番号（1始まり。第1回なら 1）。
+
+    Returns:
+        question（問題）と answer（答え）を持つ JSON 文字列。
+        その回の用語が無いときは、その旨を伝える日本語メッセージ。
+    """
+    # 1. 指定した回の用語だけを集める
+    entries = [e for e in load_glossary() if e["lecture"] == lecture]
+
+    # 2. 該当なし（0・負数・範囲外を含む）は例外にせずメッセージを返す
+    if not entries:
+        return f"第{lecture}回の用語は見つかりませんでした。用語集にある回（1始まり）を指定してください。"
+
+    # 3. 1語選んで問題と答えを作り、日本語のまま JSON にする
+    entry = random.choice(entries)
+    quiz = {
+        "question": f"「{entry['term']}」の意味は？",
+        "answer": entry["definition"],
+    }
+    return json.dumps(quiz, ensure_ascii=False)
+
+
+def save_learning_log(title: str, content: str) -> str:
+    """学習の記録を learning_log/ フォルダに Markdown ファイルとして保存する。
+
+    利用者が「今日学んだことを記録して」「学習ログに残して」などと頼んだときに使う。
+    保存は取り消しにくい操作なので、実行の前に利用者の承認が必要
+    （agent.py で requires_approval=True を付けて登録している）。
+
+    Args:
+        title: 記録の見出し（例: "第3回 エージェントの仕組み"）。
+        content: 記録の本文（学んだこと、疑問に思ったことなど）。
+
+    Returns:
+        保存したファイル名、または保存しなかった理由。
+    """
+    if not content.strip():
+        return "記録の本文が空なので、保存しませんでした。"
+
+    # ファイル名は日時だけで作る（引数を使わないので、learning_log/ の外には書けない）
+    now = datetime.now()
+    stem = now.strftime("%Y-%m-%d_%H%M%S")
+    heading = title.strip() or "学習記録"
+    text = f"# {heading}\n\n- 保存日時: {now:%Y-%m-%d %H:%M:%S}\n\n{content.strip()}\n"
+
+    LOG_DIR.mkdir(exist_ok=True)
+    n = 1
+    while True:
+        name = f"{stem}.md" if n == 1 else f"{stem}_{n}.md"
+        try:
+            # "x" は新規作成専用。同じ名前のファイルがあると FileExistsError になり、上書きしない
+            with open(LOG_DIR / name, "x", encoding="utf-8") as f:
+                f.write(text)
+        except FileExistsError:
+            n += 1
+            continue
+        return f"学習記録を learning_log/{name} に保存しました。"

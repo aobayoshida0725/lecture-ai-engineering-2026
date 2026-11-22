@@ -158,10 +158,12 @@ def search_materials(query: str) -> str:
     """
     from google.genai.errors import APIError
     import sqlite3
-    from app.retrieval import search
+    # 第5回 宿題（実装）: AIE_RAG_NEIGHBORS が1以上なら前後ページも返す。0なら通常の検索と同じ。
+    # 比較の条件をそろえるため、このdocstring（モデルへの説明文）は変えていない
+    from app.retrieval import search_with_neighbors
 
     try:
-        return json.dumps({"results": search(query)}, ensure_ascii=False)
+        return json.dumps({"results": search_with_neighbors(query)}, ensure_ascii=False)
     except (ValueError, FileNotFoundError, sqlite3.Error) as e:
         return json.dumps({"error": str(e), "results": []}, ensure_ascii=False)
     except APIError as e:

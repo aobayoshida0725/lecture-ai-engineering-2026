@@ -16,7 +16,7 @@ import sqlite_vec
 
 from app.config import (
     EMBEDDING_DIMENSIONS, EMBEDDING_MAX_TOKENS, EMBEDDING_MODEL,
-    RAG_DB, RAG_DOCUMENT_IDS, RAG_SOURCE, RAG_TOP_K, RAG_TREE, get_api_key,
+    RAG_DB, RAG_DOCUMENT_IDS, RAG_NEIGHBOR_WINDOW, RAG_SOURCE, RAG_TOP_K, RAG_TREE, get_api_key,
     RAG_GRAPH, GRAPH_START_K, GRAPH_HOPS, GRAPH_MAX_RESULTS,
 )
 
@@ -138,6 +138,49 @@ def search(query: str) -> list[dict]:
         return [dict(row) for row in rows]
 
 
+def search_with_neighbors(query: str, window: int = RAG_NEIGHBOR_WINDOW) -> list[dict]:
+    """検索で当たったページに、同じ資料の前後 window ページの本文を足して返す（第5回 宿題・実装）。
+
+    - window=0 なら search() の結果をそのまま返す（通常の検索と同じ）
+    - 当たったページは role="hit"。足したページは role="neighbor" と、
+      どの当たりの前後かを示す neighbor_of を持つ。前後ページは検索していないので distance は None
+    - 順番は検索の順位どおり。各当たりの直後に、その前後ページを置く
+    - 同じページは1回だけ返す。下位の当たりが別の当たりの前後でもある場合は、当たりとして返す
+    """
+    hits = search(query)
+    if window <= 0:
+        return hits
+
+    by_document = defaultdict(list)
+    for page in load_pages(RAG_SOURCE):
+        by_document[page["document_id"]].append(page)
+    position = {}
+    for document_id, document_pages in by_document.items():
+        document_pages.sort(key=lambda page: page["page"])
+        for i, page in enumerate(document_pages):
+            position[page["page_id"]] = (document_id, i)
+
+    hit_ids = {hit["page_id"] for hit in hits}
+    returned, results = set(), []
+    for hit in hits:
+        returned.add(hit["page_id"])
+        results.append({**hit, "role": "hit"})
+        if hit["page_id"] not in position:
+            continue
+        document_id, i = position[hit["page_id"]]
+        document_pages = by_document[document_id]
+        for j in [*range(i - window, i), *range(i + 1, i + window + 1)]:
+            if not 0 <= j < len(document_pages):
+                continue  # 資料の先頭・末尾では、片側だけになる
+            neighbor = document_pages[j]
+            if neighbor["page_id"] in hit_ids or neighbor["page_id"] in returned:
+                continue
+            returned.add(neighbor["page_id"])
+            results.append({**neighbor, "distance": None, "role": "neighbor",
+                            "neighbor_of": hit["page_id"]})
+    return results
+
+
 def search_graph(query: str) -> dict:
     """ベクトル検索を入口に、前後ページと共通用語で候補を広げる。"""
     pages = {page["page_id"]: page for page in load_pages(RAG_SOURCE)}
@@ -201,9 +244,15 @@ def run_full_context(agent, question: str, model, instructions: str, prompt_temp
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="エージェントを使わず、講義資料の検索だけを実行する")
     parser.add_argument("query", help="調べたい内容")
+    parser.add_argument("--neighbors", type=int, default=RAG_NEIGHBOR_WINDOW,
+                        help="検索で当たったページの前後何ページも表示するか（既定: AIE_RAG_NEIGHBORS、未設定なら0）")
     args = parser.parse_args()
-    for i, result in enumerate(search(args.query), 1):
+    for i, result in enumerate(search_with_neighbors(args.query, args.neighbors), 1):
         print(f"\n{'=' * 60}\n検索結果 {i}\n{'=' * 60}")
+        if result.get("role") == "neighbor":
+            print(f"種別: 前後ページ（{result['neighbor_of']} の前後）")
+        elif result.get("role") == "hit":
+            print("種別: 検索で当たったページ")
         print(f"講義: {result['document_title']}")
         print(f"章: {result['section']}")
         print(f"タイトル: {result['title']}")

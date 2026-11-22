@@ -33,7 +33,7 @@ from pydantic_ai.providers.google import GoogleProvider
 
 from app import tools
 from app.retrieval import run_full_context
-from app.config import MODEL, api_error_message, get_api_key
+from app.config import MODEL, RAG_NEIGHBOR_WINDOW, api_error_message, get_api_key
 
 INSTRUCTIONS = """\
 あなたはAIエンジニアリング講座（AIE2026）の学習支援エージェントです。
@@ -169,6 +169,13 @@ def print_trace(result, elapsed_seconds: float | None = None) -> None:
                                 print(f"      {child['content']}")
                         if not data["children"]:
                             print(f"    （末端ページ・本文{len(node.get('content', ''))}文字を取得）")
+                elif part.tool_name == "search_materials":
+                    # 第5回 宿題（実装）: 返したページを全部表示する（前後ページは「前後」と付ける）
+                    data = json.loads(part.content)
+                    pages = [r["page_id"] + ("（前後）" if r.get("role") == "neighbor" else "")
+                             for r in data.get("results", [])]
+                    error = f" / error: {data['error']}" if data.get("error") else ""
+                    print(f"[tool return] search_materials -> {len(pages)}ページ: {', '.join(pages)}{error}")
                 else:
                     print(f"[tool return] {part.tool_name} -> {str(part.content)[:120]}…")
     usage = result.usage
@@ -280,6 +287,8 @@ def main() -> None:
         print(f"[model] {MODEL}")
         if args.mcp:
             print("[tools] MCP サーバー（app/mcp_servers.json）")
+        elif RAG_NEIGHBOR_WINDOW > 0 and not (args.tree or args.graph or args.full_context):
+            print(f"[retrieval] search_materials は前後{RAG_NEIGHBOR_WINDOW}ページの本文も返す（AIE_RAG_NEIGHBORS）")
 
         started = perf_counter()
         try:

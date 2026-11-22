@@ -19,6 +19,9 @@ RAG_GRAPH = ROOT / "data/rag_data/graph.json"
 RAG_DB = Path(os.getenv("AIE_RAG_DB", str(ROOT / "data/rag_data/index.sqlite3")))
 RAG_DOCUMENT_IDS = ("lec01-main", "lec02-main", "lec03-main")
 RAG_TOP_K = 5
+# 第5回 宿題（実装）: search_materials で、検索で当たったページの前後何ページの本文も返すか。
+# 0なら通常の検索と同じ。比較するときは AIE_RAG_NEIGHBORS=1 のように環境変数で切り替える。
+RAG_NEIGHBOR_WINDOW = int(os.getenv("AIE_RAG_NEIGHBORS", "0"))
 GRAPH_START_K = 3
 GRAPH_HOPS = 2
 GRAPH_MAX_RESULTS = 10
